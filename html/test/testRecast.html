@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>通用的测试模板</title>
+    <!--<link href="../../../CSS/newland.css" rel="stylesheet">-->
+    <style>
+        html,
+        body {
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+
+        #div_allbase {
+            width: 100%;
+            height: 100%;
+        }
+        #fps {    position: absolute;    right: 20px;    top: 5em;    font-size: 20px;    color: white;/*帧数显示*/
+            text-shadow: 2px 2px 0 black;}
+    </style>
+    <script src="../lib/bbl8c/babylon.js"></script>
+    <script src="../lib/bbl8c/babylon.gui.min.js"></script>
+    <script src="../lib/newland.js"></script>
+    <script src="../lib/nohurry.js"></script>
+    <script src="../lib/bbl8c/mybabylonjs.addons.min.js"></script>
+</head>
+<body>
+<div id="div_allbase">
+    <canvas id="renderCanvas"></canvas>
+    <div id="fps" style="z-index: 302;"></div>
+</div>
+</body>
+<script>
+    var VERSION=1.0,AUTHOR="1113908055@qq.com";
+    var dir_lib_header="\.\.\/lib/";
+    var machine,canvas,engine,scene,gl,MyGame;
+    machine=navigator;
+    canvas = document.getElementById("renderCanvas");
+    var count_tile=0;
+
+    var divFps = document.getElementById("fps");
+
+    window.onload=beforewebGL;
+    async function beforewebGL()
+    {
+        //engine = new BABYLON.WebGPUEngine(canvas,{ stencil: true });//与WebGL Engine的构造参数个数不同
+        //await engine.initAsync();
+        //engine.compatibilityMode=false;//启动非兼容模式后性能略有提升（实际帧数从1300-》1400，但cpu占用从3%-》5%）
+        engine = new BABYLON.Engine(canvas, true,{ stencil: true });//WebGL模式
+
+        engine.displayLoadingUI();
+        await createScene();
+        //scene = new BABYLON.Scene(engine);
+        //webGLStart();
+
+        MyBeforeRender();
+    }
+    var mesh;
+
+    const agents = []
+    let debugNavMesh
+    let obstacleMaterial
+    let boxObstacle
+    let boxObstacleMesh
+    let boxObstacleState = false
+
+    const cylinderObstacleParams = [
+        new BABYLON.Vector3(1.5, 0, -1.5), 1, 0.5, 0
+    ]
+    const boxObstacleParams = [
+        new BABYLON.Vector3(-2, 1, 1), { x: 1, y: 1, z: 1 }, 0.2, 0
+    ]
+
+
+    var debug;
+    const createScene = async function () {
+
+        scene = createMyScene()
+
+
+        const navigationPlugin = await ADDONS.CreateNavigationPluginAsync();
+
+        const staticMesh = createStaticMesh()
+        createObstacleMaterial()
+        createGUI()
+
+        const maxAgentRadius = 0.15
+        const AGENT_COUNT = 10
+
+
+        const navmeshParameters = {
+            cs: 0.1,
+            ch: 0.05,
+            tileSize: 32,//tileSize是以cs为单位衡量的？？！！，所以128*128的地图会有1600个瓦片！！！！
+            maxObstacles: 6,tileCacheMeshProcess:tp//,keepIntermediates:true//<-生成过程中的中间数据
+            //tileCacheMeshProcess:tileCacheMeshProcess
+        }
+        //RuntimeError: null function or function signature mismatch
+        //navigationPlugin.createNavMesh(meshes, navmeshParameters);
+        const { navMesh, tileCache, navMeshQuery,intermediates  } = navigationPlugin.createNavMesh([staticMesh], navmeshParameters)
+        const { moveCrowdAgents, crowd, agents } = visualizeCrowd()
+
+        const debugMaterial = createDebugMaterial()
+
+        addCylinderObstacle(...cylinderObstacleParams)
+        toggleBoxObstacle(true)
+
+        function toggleBoxObstacle() {
+            boxObstacleState = !boxObstacleState
+            if (boxObstacleState) {
+                addBoxObstacle(...boxObstacleParams)
+            } else {
+                navigationPlugin.removeObstacle(boxObstacle)
+                boxObstacleMesh.dispose()
+            }
+
+            debugNavMesh?.dispose()
+            debugNavMesh = null
+        }
+
+        scene.onBeforeAnimationsObservable.addOnce(() => {
+            ADDONS.WaitForFullTileCacheUpdate(navMesh, tileCache)
+        })
+
+        hookPointer((pickedPoint) => {
+            moveCrowdAgents(pickedPoint)
+            computeAndDrawPathLine(pickedPoint)
+        })
+
+        drawDebug()
+
+        function drawDebug() {
+            debug = new ADDONS.NavigationDebugger(scene,
+                {
+                    primitiveTypes: ["lines"],//"lines","tris","quads","points"
+                    materials: {
+                        triMaterial:debugMaterial,
+                        pointMaterial: debugMaterial,
+                        lineMaterialOptions: {
+                            greasedLineMaterialOptions: {
+                                width: 8,
+                                sizeAttenuation: true,
+                                color: BABYLON.Color3.Yellow(),
+                            },
+                        },
+                    },
+                }
+            );
+
+            const update = () => {
+                debug.drawNavMeshPolysWithFlags(navigationPlugin.navMesh, 1, 0x0000ff);
+                debug.draw(navigationPlugin.navMesh, navigationPlugin.intermediates, scene, ADDONS.DebugLayerOption.NAVMESH);
+                // if (!debugNavMesh) {
+                //     debugNavMesh = navigationPlugin.createDebugNavMesh(scene)
+                //     debugNavMesh && (debugNavMesh.material = debugMaterial)
+                // }
+            }
+
+            update()
+
+            setInterval(() => {
+                //update()
+            }, 500)
+        }
+
+        function createObstacleMaterial() {
+            obstacleMaterial = new BABYLON.StandardMaterial("obstacle")
+            obstacleMaterial.emissiveColor = BABYLON.Color3.Red()
+            obstacleMaterial.wireframe = true
+        }
+
+        function addBoxObstacle(position,
+                                halfExtents,
+                                angle,
+                                index) {
+
+            const obstacle = navigationPlugin.addBoxObstacle(position, halfExtents, angle)
+            const obstacleMesh = drawBoxObstacle(position, halfExtents, angle, index)
+
+            boxObstacle = obstacle
+            boxObstacleMesh = obstacleMesh
+
+            return { obstacle, obstacleMesh }
+        }
+
+        function drawBoxObstacle(position, halfExtents, angle, index) {
+            const obstacleMesh = BABYLON.CreateBox(`obstacle-box-${index}`, {
+                width: halfExtents.x * 2,
+                height: halfExtents.y * 2,
+                depth: halfExtents.z * 2
+            })
+            obstacleMesh.position.x = position.x
+            obstacleMesh.position.y = position.y
+            obstacleMesh.position.z = position.z
+            obstacleMesh.rotation.y = angle
+            obstacleMesh.material = obstacleMaterial
+
+            return obstacleMesh
+        }
+
+        function addCylinderObstacle(position,
+                                     radius,
+                                     height,
+                                     index) {
+
+            const obstacle = navigationPlugin.addCylinderObstacle(position, radius, height)
+            drawCylinderObstacle(position, radius * 2, height, index)
+            return obstacle
+        }
+
+        function drawCylinderObstacle(position, diameter, height, index) {
+            const obstacleMesh = BABYLON.CreateCylinder(`obstacle-cylinder-${index}`, {
+                height,
+                diameter,
+            })
+            obstacleMesh.position.x = position.x
+            obstacleMesh.position.y = position.y
+            obstacleMesh.position.z = position.z
+            obstacleMesh.material = obstacleMaterial
+
+            return obstacleMesh
+        }
+
+        function addCylinderObstacle(position,
+                                     radius,
+                                     height,
+                                     index) {
+
+            navigationPlugin.addCylinderObstacle(position, radius, height)
+
+            drawCylinderObstacle(position, radius * 2, height, index)
+        }
+
+        function drawCylinderObstacle(position, diameter, height, index) {
+            if (!obstacleMaterial) {
+                obstacleMaterial = new BABYLON.StandardMaterial("obstacle")
+                obstacleMaterial.emissiveColor = BABYLON.Color3.Red()
+                obstacleMaterial.wireframe = true
+            }
+
+            const obstacle = BABYLON.CreateCylinder(`obstacle-${index}`, {
+                height,
+                diameter,
+            })
+            obstacle.position.x = position.x
+            obstacle.position.y = position.y
+            obstacle.position.z = position.z
+            obstacle.material = obstacleMaterial
+
+            return obstacle
+        }
+
+
+        function createStaticMesh() {
+            const mat1 = new BABYLON.StandardMaterial('mat1', scene)
+            mat1.diffuseColor = new BABYLON.Color3(1, 1, 1)
+
+            const ground1 = BABYLON.CreateGround("ground1", { width: 32, height: 32 }, scene)
+            return ground1
+        }
+
+        function computeAndDrawPathLine(pickedPoint) {
+            const pathPoints = navigationPlugin.computePath(crowd.getAgentPosition(agents[0]), navigationPlugin.getClosestPoint(pickedPoint))
+            drawLine(pathPoints)
+        }
+
+        function visualizeCrowd() {
+            const crowd = navigationPlugin.createCrowd(AGENT_COUNT, maxAgentRadius, scene)
+
+            for (let i = 0; i < AGENT_COUNT; i++) {
+                const agentParams = {
+                    radius: 0.1 + Math.random() * 0.05,
+                    height: 0.5,
+                    maxAcceleration: 11.0,
+                    maxSpeed: 5.0,
+                    separationWeight: 1.0,
+                }
+
+                const { randomPoint: position } =
+                    navMeshQuery.findRandomPointAroundCircle({ x: -2, y: 0, z: 3 }, 1)
+
+                createAgent(agentParams, position, crowd, scene)
+            }
+
+            const agents = crowd.getAgents();//这个方法返回的是数字索引！！
+
+            function moveCrowdAgents(pickedPoint) {
+                for (let i = 0; i < agents.length; i++) {
+                    crowd.agentGoto(agents[i], navigationPlugin.getClosestPoint(pickedPoint))
+                }
+            }
+
+            return { crowd, moveCrowdAgents, agents }
+        }
+
+        function hookPointer(callbackLeftClick, callbackRightClick) {
+            scene.onPointerObservable.add((pointerInfo) => {
+                switch (pointerInfo.type) {
+                    case BABYLON.PointerEventTypes.POINTERDOWN:
+                        if (pointerInfo.pickInfo.hit) {
+                            if (pointerInfo.event.button === 0 && callbackLeftClick) {
+                                callbackLeftClick(pointerInfo.pickInfo.pickedPoint)
+                            }
+                            if (pointerInfo.event.button === 2 && callbackRightClick) {
+                                callbackRightClick(pointerInfo.pickInfo.pickedPoint)
+                            }
+                        }
+                        break
+                }
+            })
+
+        }
+
+        let lineMesh
+        function drawLine(points) {
+            lineMesh?.dispose()
+
+            lineMesh = BABYLON.CreateGreasedLine("nav-line", {
+                points
+            }, {
+                sizeAttenuation: true,
+                width: 10,
+                color: BABYLON.Color3.Blue()
+            })
+        }
+
+        function createAgent(agentParams, position, crowd) {
+            const agentTransform = new BABYLON.TransformNode()
+            const agentIndex = crowd.addAgent(position, agentParams, agentTransform)
+
+            agentTransform.name = `agent-transform-${agentIndex}`
+
+            const agentMesh = createAgentMesh(agentParams, agentIndex)
+            agentMesh.parent = agentTransform
+
+            return { agentIndex, agentMesh, agentTransform }
+        }
+
+
+        function createAgentMesh(agentParams, agentIndex) {
+            const meshName = `agent-${agentIndex}`
+            let agentMesh = scene.getMeshByName(meshName)
+            if (!agentMesh) {
+                agentMesh = BABYLON.MeshBuilder.CreateCylinder(meshName, { height: agentParams.height, diameter: agentParams.radius * 2 }, scene)
+                agentMesh.position.y += agentParams.height / 2
+                agentMesh.bakeCurrentTransformIntoVertices()
+            }
+
+            const matName = `agent-${agentIndex}`
+            const matAgent = scene.getMaterialByName(matName) ?? new BABYLON.StandardMaterial(matName, scene)
+            const variation = Math.random()
+            matAgent.diffuseColor = new BABYLON.Color3(0.4 + variation * 0.6, 0.3, 1.0 - variation * 0.3)
+            agentMesh.material = matAgent
+
+            return agentMesh
+        }
+
+
+        function createDebugMaterial() {
+            const mat = new BABYLON.StandardMaterial("debug");
+            mat.emissiveColor = BABYLON.Color3.Red();
+            mat.disableLighting = true;
+            mat.alpha = 0.4;
+            return mat
+        }
+
+        function createGUI() {
+            var advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI")
+
+            var button = BABYLON.GUI.Button.CreateSimpleButton("but", "Toggle Box Obstacle")
+            button.width = 0.4
+            button.height = "40px"
+            button.color = "white"
+            button.background = "green"
+            button.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM
+            button.onPointerClickObservable.add(function (value) {
+                toggleBoxObstacle(true)
+            })
+            advancedTexture.addControl(button)
+        }
+
+        return scene
+    }
+    //这个方法需在初始化导航网格之前继承TileCacheMeshProcess类，使之具有raw属性！否则无法被wasm读取！！
+    //按32为大小，将128*128的地面分为16块，对于每一块调用一次此方法，对于每一小块可能由多个“多边型”组成（这些多边形通常是y方向上的不同层），每个多边形又由多个三角形组成
+    function tp(navMeshCreateParams,polyAreas,polyFlags){
+
+        const STAIRS_AREA = 1;
+        const DEFAULT_AREA = 0;
+        const WALK_FLAG = 1;//这是水平移动消耗？
+        const STAIRS_FLAG = 10;
+
+        const vertsCount = navMeshCreateParams.vertCount();
+        const polyCount=navMeshCreateParams.polyCount();
+        const indicesCount = polyCount;
+        var tileX=navMeshCreateParams.tileX();//这个瓦片的水平偏移量？
+        var tileY=navMeshCreateParams.tileY();
+        for (let i = 0; i < polyCount; i++) {//对于每个多边形
+            // compute average y of polygon vertices
+            const idx0 = navMeshCreateParams.polys(i * 3 + 0);//polys是顶点的索引，例如一个正方形多边形包括四个顶点
+            const idx1 = navMeshCreateParams.polys(i * 3 + 1);
+            const idx2 = navMeshCreateParams.polys(i * 3 + 2);//polys(4)是65535
+            //verts是顶点数据，
+            const avgY = (navMeshCreateParams.verts(idx0 * 3 + 1) + navMeshCreateParams.verts(idx1 * 3 + 1) + navMeshCreateParams.verts(idx2 * 3 + 1)) / 3;
+
+            if (tileX>=5) {
+                polyAreas.set(i,STAIRS_AREA)
+                polyFlags.set(i,STAIRS_FLAG)
+                //polyAreas[i] = STAIRS_AREA;
+                //polyFlags[i] = STAIRS_FLAG;
+            } else {
+                polyAreas.set(i,DEFAULT_AREA)
+                polyFlags.set(i,WALK_FLAG)
+                //polyAreas[i] = DEFAULT_AREA;
+                //polyFlags[i] = WALK_FLAG;
+            }
+            count_tile++;
+        }
+
+    }
+
+    function createMyScene(engine) {
+        const scene = new BABYLON.Scene(engine)
+
+        const light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), scene)
+        light.intensity = 0.7
+
+        const camera = new BABYLON.ArcRotateCamera("camera", 1.8, 1, 20, new BABYLON.Vector3(2, 0, 0), scene)
+        camera.attachControl(canvas, true)
+
+        return scene
+    }
+
+    //var sceneInstrumentation
+    function MyBeforeRender()
+    {
+        console.log("MyBeforeRender");
+        //sceneInstrumentation = new BABYLON.SceneInstrumentation(scene);//用来进行计时
+        //sceneInstrumentation.captureFrameTime = true;
+        engine.hideLoadingUI();
+        window.addEventListener("resize", function () {
+            if (engine) {
+                engine.resize();//resize之后也需要重新生成快照！！
+            }
+        },false);
+
+        scene.registerBeforeRender(
+            function(){
+            }
+        )
+        scene.registerAfterRender(
+            function() {
+            }
+        )
+        engine.runRenderLoop(function () {
+
+            if (divFps) {
+                // Fps
+                divFps.innerHTML = engine.getFps().toFixed() + " fps";
+            }
+
+            //lastframe=new Date().getTime();
+            scene.render();
+        });
+    }
+
+
+</script>
+
+</html>

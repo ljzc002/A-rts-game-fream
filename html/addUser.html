@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>测试ws</title>
+    <style>
+        html, body {
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        .div_qr{
+            width: 256px;
+            height: 256px;
+        }
+    </style>
+    <script src="lib/qrcode.min.js"></script>
+    <script src="config.js"></script>
+</head>
+<body>
+    <input id="input_send"><button id="btn_send">发送</button>
+    <div id="div_allbase">
+
+    </div>
+    <div id="div_hidden" style="display: none">
+        <div class="div_qrcanvas">
+            <!--<canvas width="256" height="256"></canvas>-->
+            <div class="div_qr"></div>
+            <div class="div_comment"></div>
+        </div>
+    </div>
+</body>
+<script>
+    var ws;
+    var wsConnected=false;
+    var userId=window.location.hash.substr(1);
+    var input_send=document.getElementById("input_send");
+    var btn_send=document.getElementById("btn_send");
+    var div_allbase=document.getElementById("div_allbase");
+    var div_qrcanvas=document.getElementById("div_hidden").getElementsByClassName("div_qrcanvas")[0];
+    btn_send.onclick=function(){
+        talk(input_send.value);
+    }
+    window.onload=function(){
+        createQRCode('./addUser.html#'+userId,'复制此用户');
+        ws=new WebSocket("ws://"+localIP+":"+wsPort);
+        ws.onopen = function (e) {
+            console.log('Connection to server opened');
+            //@@@@这里应该到admin去获取初始化信息以及自身在ws中的通道id，获取成功后才算连接完成！！！！
+            wsConnected = true;
+        }
+        ws.onclose = function(e) {
+            // 可以在 onclose 和 onerror 中处理重连的逻辑，再决定是否将状态更新为未连接状态
+            wsConnected = false;
+        }
+
+        ws.onerror = function(e) {
+            wsConnected = false;
+        }
+        ws.onmessage = function(e) {
+            var msg = JSON.parse(e.data);
+            switch(msg.type) {
+
+                case "talk2EveryOne":
+                {
+                    var userId=msg.userId;
+                    logWs(userId+":"+msg.data)
+                }
+            }
+        }
+    }
+    function logWs(message)
+    {
+        //console.log(message);
+        var p=document.createElement("p");
+        p.innerHTML=message;
+        div_allbase.appendChild(p);
+    }
+    function sendMessage(str_json) {
+        if(wsConnected) {
+            ws.send(str_json);
+        }else {
+            this.logWs("与服务器断开连接了，刷新重新连接~");
+            //message.warn("与服务器断开连接了，刷新重新连接~");
+        }
+    }
+    function talk(str)
+    {
+        var obj_msg={};
+        obj_msg.data=str;
+        obj_msg.type="talk2EveryOne";
+        obj_msg.userId=userId;
+        sendMessage(JSON.stringify(obj_msg));
+    }
+    function createQRCode(str_url,str_comment,callback)
+    {
+        //var qr = qrcode(0, 'L'); // 0表示自动选择纠错等级和模式
+        //qr.addData(str_url); // 添加数据
+        //qr.make(); // 生成二维码
+
+        var div_qrcanvas2=div_qrcanvas.cloneNode(true);
+        div_allbase.appendChild(div_qrcanvas2);
+        //var canvas=div_qrcanvas2.getElementsByTagName("canvas")[0];
+
+        //var img = this; // 获取图片元素
+        //var ctx = canvas.getContext('2d'); // 获取2D渲染上下文
+        //ctx.drawImage(img, 0, 0, img.width, img.height); // 将图片绘制到canvas上
+        //requestAnimationFrame(function(){
+        var divs=div_qrcanvas2.getElementsByTagName("div");
+        var qrcode = new QRCode(divs[0], {
+            width : 256,
+            height : 256
+        });
+        qrcode.makeCode(str_url);
+        var div_comment=divs[1];
+        div_comment.innerHTML=str_comment;
+        qrcode.div_comment=div_comment;
+        if(callback)
+        {
+            callback();
+        }
+
+        //})
+        return qrcode;
+    }
+</script>
+</html>

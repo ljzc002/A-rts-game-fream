@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>测试ws</title>
+    <script src="config.js"></script>
+</head>
+<body>
+
+</body>
+<script>
+    var ws;
+    var wsConnected=false;
+    var userId="admin";
+    window.onload=function(){
+        ws=new WebSocket("ws://"+localIP+":"+wsPort);
+        ws.onopen = function (e) {
+            console.log('Connection to server opened');
+            //@@@@这里应该到admin去获取初始化信息以及自身在ws中的通道id，获取成功后才算连接完成！！！！
+            wsConnected = true;
+        }
+        ws.onclose = function(e) {
+            // 可以在 onclose 和 onerror 中处理重连的逻辑，再决定是否将状态更新为未连接状态
+            wsConnected = false;
+        }
+
+        ws.onerror = function(e) {
+            wsConnected = false;
+        }
+        ws.onmessage = function(e) {
+            var msg = JSON.parse(e.data);
+            switch(msg.type) {
+
+                case "talk2EveryOne":
+                {
+                    var userId=msg.userId;
+                    logWs(userId+":"+msg.data)
+                }
+            }
+        }
+    }
+    function logWs(message)
+    {
+        console.log(message);
+    }
+    function sendMessage(str_json) {
+        if(wsConnected) {
+            ws.send(str_json);
+        }else {
+            this.logWs("与服务器断开连接了，刷新重新连接~");
+            //message.warn("与服务器断开连接了，刷新重新连接~");
+        }
+    }
+    function talk(str)
+    {
+        var obj_msg={};
+        obj_msg.data=str;
+        obj_msg.type="talk2EveryOne";
+        obj_msg.userId=userId;
+        sendMessage(JSON.stringify(obj_msg));
+    }
+</script>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>类似WH的互操作场景，要兼容移动设备</title>
+    <style>
+        html, body {
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        #renderCanvas {
+            width: 100%;
+            height: 70%;
+            touch-action: none;
+        }
+        #fps {    position: absolute;    right: 20px;    top: 5em;    font-size: 20px;    color: white;/*帧数显示*/
+            text-shadow: 2px 2px 0 black;}
+        #div_bottom div{
+            position: absolute;
+        }
+        .div_btn{
+            font-size: 20px;line-height: 20px;position: absolute;cursor:crosshair;
+        }
+        .div_htmlmesh{
+            font-size: 100%;line-height: 100%;position: absolute;border:1px solid;top:-50%;left:-50%
+        }
+        .mod_group,.mod_unit{
+            font-size: 100%;line-height: 100%;position: absolute;
+        }
+    </style>
+    <script src="./lib/bbl8b/babylon.js"></script>
+    <script src="./lib/bbl8b/babylon.inspector.bundle.js"></script>
+    <script src="./lib/bbl8b/babylon.gui.min.js"></script>
+    <script src="./lib/newland.js"></script>
+    <script src="./lib/nohurry.js"></script>
+    <script src="./lib/VTools.js"></script>
+    <!--<script src="./lib/sqliteClient.js"></script>-->
+    <script src="./lib/ControlGui.js"></script>
+    <script src="./lib/ControlQX5.js"></script>
+    <script src="./lib/drawStellaris6.js"></script>
+    <script src="./lib/drawSprites.js"></script>
+    <script src="./lib/drawGalaxy6.js"></script>
+    <script src="./lib/drawStar.js"></script>
+    <script src="./lib/drawPlanet.js"></script>
+</head>
+<body>
+    <canvas id="renderCanvas" touch-action="none"></canvas>
+    <div id="fps" style="z-index: 302;"></div>
+    <div id="div_bottom" style="z-index: 301;position: absolute;bottom: 0px;width: 100%;height: 30%;font-size: 12px;border-top: 1px solid">
+
+    </div>
+    <div id="div_comment" style="z-index: 302;position:fixed;display: none;width: 200px;height: 400px;left: 0px;bottom:0px;border: 1px solid black">
+    </div>
+    <div id="btn_comment" style="z-index: 303;position:fixed;display: block;width: 20px;height: 80px;left: 0px;bottom:150px;text-align: center;
+                background-color:gainsboro;cursor: pointer;border: 1px solid black"
+         onclick="showComment()">提<br/>示<br/>》
+    </div>
+    <div id="div_hidden" style="display: none">
+
+    </div>
+</body>
+<script>
+    console.log(new Date().getTime());
+    var flag_runningstate="等待场景初始化";
+    var VERSION=1.0,AUTHOR="1113908055@qq.com";
+    var machine,canvas,engine,scene,gl,MyGame,camera0,camera_minimap,experience;
+    //var camera_x,camera_x2,camera_y,camera_y2,camera_z,camera_z2;//用来生成即时天空盒
+    machine=navigator;
+    canvas = document.getElementById("renderCanvas");
+    var div_bottom=document.getElementById("div_bottom");
+    var divFps = document.getElementById("fps");
+    var div_hidden= document.getElementById("div_hidden");
+    var flag_webgpu=false;
+
+    var one=null;//如果有第一人称或第三人称控制的核心对象
+    var int_z=0;//这个值越大代表距离越近，显示的svg细节越仔细，规定在小于-2时减少显示细节
+    var int0=1,int0b=1;
+    var divFps = document.getElementById("fps");
+    window.onload=beforewebGL;
+
+    async function beforewebGL()
+    {
+        engine=new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true,  disableWebGL2Support: false});
+        scene = new BABYLON.Scene(engine);
+        Init();
+    }
+    async function Init()
+    {
+        await initScene();
+        await initArena();
+        initGuiControl();
+        InitMouse();
+        webGLStart2();
+    }
+    var mat_global={},hd_camera0=Math.PI/2;
+    async function initScene()
+    {
+        //scene.clearColor=new BABYLON.Color3(0,0,0);
+        var light0 = new BABYLON.HemisphericLight("light0", new BABYLON.Vector3(0, 1, 0), scene);
+        light0.diffuse = new BABYLON.Color3(1,1,1);//这道“颜色”是从上向下的，底部收到100%，侧方收到50%，顶部没有
+        light0.specular = new BABYLON.Color3(0,0,0);
+        light0.groundColor = new BABYLON.Color3(1,1,1);//这个与第一道正相反
+
+        camera0= new BABYLON.UniversalCamera("FreeCamera", new BABYLON.Vector3(0, 600, 0), scene);
+        camera0.rotation.x=hd_camera0;//需要45度斜向下视角
+        camera0.maxZ=20000;
+        camera0.minZ=0.1;
+        //scene.activeCameras.push(camera0);
+        camera0.speed=1;
+        camera0.myRotation={x:0,y:0,z:0};
+        var node_hand=new BABYLON.TransformNode("hand");
+        node_hand.position.z=1;
+        node_hand.parent=camera0;
+        camera0.node_hand=node_hand;
+        var node_pick=new BABYLON.TransformNode("pick");
+        node_pick.position.z=100;
+        node_pick.parent=camera0;
+        camera0.node_pick=node_pick;
+        scene.activeCameras = [camera0];
+        var mat_green=new BABYLON.StandardMaterial("mat_green", scene);
+        mat_green.diffuseColor = new BABYLON.Color3(0, 1, 0);
+        mat_green.freeze();
+        mat_global.mat_green=mat_green;
+        var mat_frame=new BABYLON.StandardMaterial("mat_frame", scene);
+        mat_frame.wireframe=true;
+        mat_frame.freeze();
+        mat_global.mat_frame=mat_frame;
+        var mat_white_e=new BABYLON.StandardMaterial("mat_white_e", scene);
+        mat_white_e.disableLighting = true;
+        mat_white_e.emissiveColor = BABYLON.Color3.White();
+        mat_white_e.freeze();
+        mat_global.mat_white_e=mat_white_e;
+    }
+    var skybox;
+    var HK,physicsPlugin,observable;
+    //碰撞过滤器
+    var filter_group_l=1;
+    var filter_group_r=2;
+    var filter_group_g=4;
+    var filter_group_a=8;
+    async function initArena()
+    {
+        HK=await HavokPhysics();
+        physicsPlugin = new BABYLON.HavokPlugin();
+        scene.enablePhysics(new BABYLON.Vector3(0, -9.8, 0), physicsPlugin);
+        observable = physicsPlugin.onCollisionObservable;
+        var observer = observable.add((collisionEvent) => {
+            //fight0(collisionEvent);//碰撞事件
+        });
+
+        var mesh_ground = BABYLON.MeshBuilder.CreateGround("ground", {width: 180, height: 180}, scene);
+        mesh_ground.alwaysSelectAsActiveMesh = true;
+        //mesh_ground.renderingGroupId=2;
+        mesh_ground.position.x=80;
+        mesh_ground.position.z=80;
+        var mat = new BABYLON.StandardMaterial("mat_ground", scene);//1
+        mat.disableLighting = true;
+        mat.emissiveTexture = new BABYLON.Texture("./assets/image/LANDTYPE/terre.png", scene);
+        mat.emissiveTexture.uScale = 8
+        mat.emissiveTexture.vScale = 8;
+        mat.freeze();
+        mesh_ground.material = mat;
+        mesh_ground.physicsImpostor=new BABYLON.PhysicsAggregate(mesh_ground, BABYLON.PhysicsShapeType.MESH
+            , { mass: 0, restitution: 0.1 ,friction:0.9,move:false,margin:0}, scene);
+        mesh_ground.physicsImpostor.shape.filterMembershipMask=filter_group_g;
+        //mesh_ground.physicsImpostor.shape.filterCollideMask=filter_group_g;
+        //四周的围栏，它们是一直存在的，随着用户的操作还会生成一些临时的围栏
+        var mesh_ground = BABYLON.MeshBuilder.CreateGround("ground1", {width: 180, height: 20}, scene);
+        mesh_ground.position.x=80;
+        mesh_ground.position.z=170;
+        mesh_ground.rotation.x=Math.PI/2;
+        mesh_ground.physicsImpostor=new BABYLON.PhysicsAggregate(mesh_ground, BABYLON.PhysicsShapeType.MESH
+            , { mass: 0, restitution: 0.1 ,friction:0.9,move:false,margin:0}, scene);
+        mesh_ground.physicsImpostor.body.mesh_ground=mesh_ground;
+        mesh_ground.physicsImpostor.shape.filterMembershipMask=filter_group_g;
+        var mesh_ground = BABYLON.MeshBuilder.CreateGround("ground2", {width: 180, height: 20}, scene);
+        mesh_ground.position.x=80;
+        mesh_ground.position.z=-10;
+        mesh_ground.rotation.x=Math.PI/2;
+        mesh_ground.physicsImpostor=new BABYLON.PhysicsAggregate(mesh_ground, BABYLON.PhysicsShapeType.MESH
+            , { mass: 0, restitution: 0.1 ,friction:0.9,move:false,margin:0}, scene);
+        mesh_ground.physicsImpostor.body.mesh_ground=mesh_ground;
+        mesh_ground.physicsImpostor.shape.filterMembershipMask=filter_group_g;
+        var mesh_ground = BABYLON.MeshBuilder.CreateGround("ground3", {width: 20, height: 180}, scene);
+        mesh_ground.position.x=-10;
+        mesh_ground.position.z=80;
+        mesh_ground.rotation.z=Math.PI/2;
+        mesh_ground.physicsImpostor=new BABYLON.PhysicsAggregate(mesh_ground, BABYLON.PhysicsShapeType.MESH
+            , { mass: 0, restitution: 0.1 ,friction:0.9,move:false,margin:0}, scene);
+        mesh_ground.physicsImpostor.body.mesh_ground=mesh_ground;
+        mesh_ground.physicsImpostor.shape.filterMembershipMask=filter_group_g;
+        var mesh_ground = BABYLON.MeshBuilder.CreateGround("ground4", {width: 20, height: 180}, scene);
+        mesh_ground.position.x=170;
+        mesh_ground.position.z=80;
+        mesh_ground.rotation.z=Math.PI/2;
+        mesh_ground.physicsImpostor=new BABYLON.PhysicsAggregate(mesh_ground, BABYLON.PhysicsShapeType.MESH
+            , { mass: 0, restitution: 0.1 ,friction:0.9,move:false,margin:0}, scene);
+        mesh_ground.physicsImpostor.body.mesh_ground=mesh_ground;
+        mesh_ground.physicsImpostor.shape.filterMembershipMask=filter_group_g;
+    }
+
+
+
+
+    var flag_comment=false;
+    var div_comment=document.getElementById("div_comment");
+    var btn_comment=document.getElementById("btn_comment");
+    function showComment()
+    {
+        if(!flag_comment)
+        {
+            div_comment.style.display="block";
+            btn_comment.style.left="201px";
+            btn_comment.innerHTML="提<br/>示<br/>《";
+        }
+        else {
+            div_comment.style.display="none";
+            btn_comment.style.left="0px";
+            btn_comment.innerHTML="提<br/>示<br/>》";
+        }
+        flag_comment=!flag_comment;
+    }
+</script>
+</html>
