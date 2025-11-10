@@ -17,8 +17,8 @@ function initMap()
     }
     obj_maparea[2].push(points_tree);
     var mesh_extrude=new BABYLON.MeshBuilder.ExtrudePolygon("mesh_extrude"
-        , {shape: path_tree, depth: 0.5,sideOrientation:BABYLON.Mesh.DOUBLESIDE,updatable:true});
-    mesh_extrude.position.y=0;
+        , {shape: path_tree, depth: 1,sideOrientation:BABYLON.Mesh.DOUBLESIDE,updatable:true});
+    mesh_extrude.position.y=0.5;
     mesh_extrude.mydata={};
     mesh_extrude.mydata.maxSpeed=2;
     var mat = new BABYLON.StandardMaterial("mat_tree", scene);//1
@@ -84,4 +84,5 @@ function initMap()
         }
     }
     mesh_extrude.updateVerticesData(BABYLON.VertexBuffer.UVKind,data_uv);
+
 }
